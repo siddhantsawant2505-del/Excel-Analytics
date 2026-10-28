@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
-import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'; // Added Outlet
+import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 import {
   BarChart3,
   Upload,
-  Settings,
   LogOut,
   User,
   Home,
   Shield,
   Menu,
-  X
+  X,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -19,7 +19,7 @@ const Layout = () => {
   const { user, logout, isAdmin } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true); // Sidebar open by default
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -29,6 +29,7 @@ const Layout = () => {
   const navigationItems = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Upload File', href: '/upload', icon: Upload },
+    { name: 'Reports', href: '/reports', icon: FileSpreadsheet },
     ...(isAdmin ? [{ name: 'Admin Panel', href: '/admin', icon: Shield }] : [])
   ];
 
@@ -46,15 +47,15 @@ const Layout = () => {
   const getPageTitle = () => {
     if (location.pathname === '/dashboard') return 'Dashboard';
     if (location.pathname === '/upload') return 'Upload File';
+    if (location.pathname === '/reports') return 'Your Reports';
     if (location.pathname === '/admin') return 'Admin Panel';
     if (location.pathname.startsWith('/analytics')) return 'Analytics';
-    return 'Page';
+    return 'Dashboard';
   };
 
   return (
-    // Root container: full viewport height, no fixed width to avoid horizontal overflow
     <div className="min-h-screen overflow-hidden bg-gray-50 m-0 p-0 box-border">
-      {/* Mobile overlay when sidebar is open on small screens */}
+      {/* Mobile backdrop overlay */}
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -67,12 +68,11 @@ const Layout = () => {
         )}
       </AnimatePresence>
 
-      {/* Wrapper flex container for sidebar and main content on large screens */}
       <div className="lg:flex lg:h-screen overflow-hidden">
         {/* Sidebar */}
         <motion.div
           variants={sidebarVariants}
-          animate={sidebarOpen ? 'open' : 'closed'}
+          animate={sidebarOpen ? 'open' : (window.innerWidth >= 1024 ? 'open' : 'closed')}
           className="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-xl
                      lg:static lg:translate-x-0 lg:z-auto lg:flex-shrink-0"
         >
@@ -102,7 +102,9 @@ const Layout = () => {
                   <Link
                     key={item.name}
                     to={item.href}
-                    onClick={() => setSidebarOpen(true)}
+                    onClick={() => {
+                      if (window.innerWidth < 1024) setSidebarOpen(false);
+                    }}
                     className={clsx(
                       'flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 box-border',
                       isActive
@@ -150,14 +152,14 @@ const Layout = () => {
           <div className="bg-white border-b border-gray-200 px-4 sm:px-6 lg:px-8 flex-shrink-0 box-border">
             <div className="flex h-16 items-center justify-between">
               <div className="flex items-center gap-4">
-                {/* Hamburger menu: always visible and toggles sidebar */}
-                {/* <button
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="p-2 rounded-md hover:bg-gray-100"
-                  aria-label="Toggle sidebar"
+                {/* Mobile hamburger menu button */}
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="p-2 rounded-md hover:bg-gray-100 lg:hidden"
+                  aria-label="Open sidebar"
                 >
-                  <Menu className="w-5 h-5" />
-                </button> */}
+                  <Menu className="w-6 h-6 text-gray-700" />
+                </button>
 
                 <h1 className="text-xl font-semibold text-gray-800">
                   <span className="gradient-text">{getPageTitle()}</span>
@@ -174,23 +176,18 @@ const Layout = () => {
             </div>
           </div>
 
-          {/* Content container: flex grow + scroll, renders nested child routes */}
+          {/* Content container */}
           <div className="flex flex-col flex-grow min-h-0 overflow-hidden">
             <main className="flex-1 p-0 m-0 overflow-auto min-h-0 box-border">
               <motion.div
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className="h-full px-4 sm:px-6 lg:px-8 py-4 box-border"
+                className="h-full px-4 sm:px-6 lg:px-8 py-6 box-border"
               >
                 <Outlet />
               </motion.div>
             </main>
-
-            {/* OPTIONAL: Bottom quick actions or footer can go here */}
-            {/* <div className="px-4 sm:px-6 lg:px-8 py-4 border-t border-gray-200 box-border flex-shrink-0">
-              Quick Actions or Footer content
-            </div> */}
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion } from 'framer-motion';
 import { 
@@ -8,32 +8,31 @@ import {
   CheckCircle, 
   AlertCircle,
   Download,
-  Eye
+  BarChart3
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import api from '../services/api';
 import toast from 'react-hot-toast';
 
 const UploadPage = () => {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [uploadHistory, setUploadHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetchUploadHistory();
   }, []);
 
   const fetchUploadHistory = async () => {
     try {
-      const response = await axios.get('https://excel-analytics-1-4y0b.onrender.com/api/upload/history');
-      setUploadHistory(response.data.uploads);
+      const response = await api.get('/api/upload/history');
+      setUploadHistory(response.data.uploads || []);
     } catch (error) {
       console.error('Error fetching upload history:', error);
+      toast.error('Failed to load upload history');
     } finally {
       setLoading(false);
     }
@@ -44,12 +43,11 @@ const UploadPage = () => {
     if (!file) return;
 
     // Validate file type
-    const allowedTypes = [
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    ];
+    const allowedExtensions = ['.xls', '.xlsx'];
+    const fileName = file.name.toLowerCase();
+    const hasValidExt = allowedExtensions.some(ext => fileName.endsWith(ext));
 
-    if (!allowedTypes.includes(file.type)) {
+    if (!hasValidExt) {
       toast.error('Please upload only Excel files (.xls, .xlsx)');
       return;
     }
@@ -66,16 +64,14 @@ const UploadPage = () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/upload', formData, {
+      const response = await api.post('/api/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
 
       setUploadedFile(response.data.upload);
-      toast.success('File uploaded successfully!');
-      
-      // Refresh upload history
+      toast.success('File uploaded and processed successfully!');
       fetchUploadHistory();
     } catch (error) {
       const message = error.response?.data?.message || 'Upload failed';
@@ -99,17 +95,37 @@ const UploadPage = () => {
     navigate(`/analytics/${uploadId}`);
   };
 
+  const handleDownload = async (uploadId, originalName) => {
+    try {
+      const response = await api.get(`/api/upload/${uploadId}/download`, {
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', originalName || 'spreadsheet.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('File downloaded successfully');
+    } catch (error) {
+      console.error('Download error:', error);
+      toast.error('Failed to download file');
+    }
+  };
+
   const handleDelete = async (uploadId) => {
-    if (!window.confirm('Are you sure you want to delete this upload?')) {
+    if (!window.confirm('Are you sure you want to delete this upload? Associated charts and analytics will also be removed.')) {
       return;
     }
 
     try {
-      await axios.delete(`https://excel-analytics-1-4y0b.onrender.com/api/upload/${uploadId}`);
+      await api.delete(`/api/upload/${uploadId}`);
       toast.success('Upload deleted successfully');
       fetchUploadHistory();
       
-      // Clear uploaded file if it's the one being deleted
       if (uploadedFile?.id === uploadId) {
         setUploadedFile(null);
       }
@@ -120,7 +136,7 @@ const UploadPage = () => {
   };
 
   const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
+    if (!bytes || bytes === 0) return '0 Bytes';
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -139,7 +155,7 @@ const UploadPage = () => {
         <div className="text-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Upload Excel File</h2>
           <p className="text-gray-600">
-            Upload your Excel file (.xls, .xlsx) to start analyzing your data
+            Upload your Excel file (.xls, .xlsx) to generate interactive charts and AI insights
           </p>
         </div>
 
@@ -157,7 +173,7 @@ const UploadPage = () => {
           
           <div className="flex flex-col items-center justify-center py-12">
             {uploading ? (
-              <LoadingSpinner size="lg" text="Uploading and processing file..." />
+              <LoadingSpinner size="lg" text="Uploading and processing spreadsheet..." />
             ) : (
               <>
                 <Upload className="w-16 h-16 text-gray-400 mb-4" />
@@ -177,7 +193,7 @@ const UploadPage = () => {
           </div>
         </div>
 
-        {/* Upload Success */}
+        {/* Upload Success Banner */}
         {uploadedFile && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -190,7 +206,7 @@ const UploadPage = () => {
                 <div>
                   <p className="font-medium text-green-900">{uploadedFile.fileName}</p>
                   <p className="text-sm text-green-700">
-                    {uploadedFile.totalRows} rows, {uploadedFile.totalColumns} columns
+                    {uploadedFile.totalRows} rows, {uploadedFile.totalColumns} columns detected
                   </p>
                 </div>
               </div>
@@ -253,8 +269,21 @@ const UploadPage = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  
-                  
+                  <button
+                    onClick={() => handleAnalyze(upload._id)}
+                    className="btn btn-primary btn-sm flex items-center gap-1"
+                    title="Analyze File"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span className="hidden sm:inline">Analyze</span>
+                  </button>
+                  <button
+                    onClick={() => handleDownload(upload._id, upload.originalName)}
+                    className="btn btn-outline btn-sm text-gray-700 hover:bg-gray-200"
+                    title="Download Spreadsheet"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={() => handleDelete(upload._id)}
                     className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50"
@@ -287,12 +316,12 @@ const UploadPage = () => {
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
           <div>
-            <h4 className="font-medium text-blue-900 mb-2">Tips for better results</h4>
+            <h4 className="font-medium text-blue-900 mb-2">Tips for optimal results</h4>
             <ul className="text-sm text-blue-800 space-y-1">
-              <li>• Ensure your Excel file has clear column headers</li>
-              <li>• Remove any merged cells or complex formatting</li>
-              <li>• Keep data in a simple table format</li>
-              <li>• File size should be under 10MB for optimal performance</li>
+              <li>• Ensure your Excel file has clear column headers on the first row</li>
+              <li>• Avoid merged cells or multi-level headers</li>
+              <li>• Ensure numeric columns contain clean numbers without text symbols ($ or %)</li>
+              <li>• Maximum file size limit is 10MB</li>
             </ul>
           </div>
         </div>

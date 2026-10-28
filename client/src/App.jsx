@@ -12,8 +12,7 @@ import LoadingSpinner from './components/LoadingSpinner';
 import ViewReports from './pages/ViewReport';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 
-// Replace with your actual Google OAuth client ID!
-const GOOGLE_CLIENT_ID = '1046944268854-e4ubv6qc81vengcqoqraldf4il58fvm1.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '1046944268854-e4ubv6qc81vengcqoqraldf4il58fvm1.apps.googleusercontent.com';
 
 function App() {
   const { user, loading } = useAuth();
@@ -21,7 +20,7 @@ function App() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <LoadingSpinner size="lg" />
+        <LoadingSpinner size="lg" text="Authenticating..." />
       </div>
     );
   }
@@ -54,7 +53,7 @@ function App() {
             />
           </Route>
 
-          {/* Catch all route - redirect to homepage or some safe page */}
+          {/* Catch all route */}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </div>

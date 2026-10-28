@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Eye, BarChart3, FileSpreadsheet, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
-import axios from 'axios';
 import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Chart as ChartJS, registerables } from 'chart.js';
@@ -10,7 +9,7 @@ import { Bar, Line, Pie } from 'react-chartjs-2';
 import ReactMarkdown from 'react-markdown';
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import api from '../services/api';
 
 ChartJS.register(...registerables, zoomPlugin);
 
@@ -19,7 +18,6 @@ const ViewReports = () => {
     const [loading, setLoading] = useState(true);
     const [expandedReports, setExpandedReports] = useState({});
     const [insightsMap, setInsightsMap] = useState({});
-    const [expandedCharts, setExpandedCharts] = useState({});
     const [modalChart, setModalChart] = useState(null);
     const [loadingInsightMap, setLoadingInsightMap] = useState({});
 
@@ -29,13 +27,13 @@ const ViewReports = () => {
 
     const fetchReports = async () => {
         try {
-            const reportsResponse = await axios.get('https://excel-analytics-1-4y0b.onrender.com/api/analytics/reports');
-            const reports = reportsResponse.data;
+            const reportsResponse = await api.get('/api/analytics/reports');
+            const reportsList = reportsResponse.data;
 
             const reportsWithCharts = await Promise.all(
-                reports.map(async (report) => {
+                reportsList.map(async (report) => {
                     try {
-                        const chartResp = await axios.get(`https://excel-analytics-1-4y0b.onrender.com/api/chart-analytics/${report._id}`);
+                        const chartResp = await api.get(`/api/chart-analytics/${report._id}`);
                         return {
                             ...report,
                             chartConfigs: chartResp.data,
@@ -62,6 +60,7 @@ const ViewReports = () => {
             setReports(reportsWithCharts);
             setInsightsMap(initialInsights);
         } catch (error) {
+            console.error('Fetch reports error:', error);
             toast.error('Failed to fetch reports');
         } finally {
             setLoading(false);
@@ -81,14 +80,14 @@ const ViewReports = () => {
                 config: {
                     labels: chartData.labels,
                     data: dataArray,
-                    xLabel: 'Month',    // replace with dynamic value if available
-                    yLabel: 'Revenue',  // replace with dynamic value if available
+                    xLabel: 'Category',
+                    yLabel: 'Value',
                     label: dataLabel || 'Dataset'
                 },
                 chartType
             };
 
-            const response = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/insights/generate', payload);
+            const response = await api.post('/api/insights/generate', payload);
 
             setInsightsMap(prev => ({
                 ...prev,
@@ -98,18 +97,10 @@ const ViewReports = () => {
             toast.success('Insight generated!', { id: toastId });
         } catch (error) {
             toast.error('Failed to generate insight', { id: toastId });
-            if (error.response) {
-                console.error('Insight generation error:', error.response.data);
-            } else {
-                console.error('Insight generation error:', error.message);
-            }
+            console.error('Insight generation error:', error);
         } finally {
             setLoadingInsightMap(prev => ({ ...prev, [chartId]: false }));
         }
-    };
-
-    const toggleChart = (chartId) => {
-        setExpandedCharts(prev => ({ ...prev, [chartId]: !prev[chartId] }));
     };
 
     const toggleReport = (reportId) => {
@@ -218,13 +209,10 @@ const ViewReports = () => {
                     });
 
                     const pdfWidth = pdf.internal.pageSize.getWidth();
-                    const pdfHeight = pdf.internal.pageSize.getHeight();
-
-                    const imgProps = pdf.getImageProperties(imgData);
-                    const imgAspect = imgProps.height / imgProps.width;
-
                     const margin = 40;
                     const maxImgWidth = pdfWidth - margin * 2;
+                    const imgProps = pdf.getImageProperties(imgData);
+                    const imgAspect = imgProps.height / imgProps.width;
                     const scaledImgWidth = maxImgWidth;
                     const scaledImgHeight = scaledImgWidth * imgAspect;
 
@@ -232,7 +220,7 @@ const ViewReports = () => {
                     const y = margin;
                     pdf.addImage(imgData, 'PNG', x, y, scaledImgWidth, scaledImgHeight);
 
-                    let textBaseY = y + scaledImgHeight + 30;
+                    const textBaseY = y + scaledImgHeight + 30;
 
                     if (insightText && insightText.trim().length > 0) {
                         pdf.setFontSize(18);
@@ -278,7 +266,7 @@ const ViewReports = () => {
                 className="bg-gradient-to-r from-primary-600 to-secondary-600 rounded-2xl p-8 text-white"
             >
                 <h1 className="text-3xl font-bold">📑 Your Reports</h1>
-                <p className="text-primary-100 text-lg">All your previous Excel chart reports at one place.</p>
+                <p className="text-primary-100 text-lg">All your saved Excel chart reports and AI analysis in one place.</p>
             </motion.div>
 
             <motion.div
@@ -311,7 +299,7 @@ const ViewReports = () => {
                                         </div>
                                     </div>
                                     <div className="text-sm text-gray-700 font-semibold">
-                                        Charts: <span>{report.chartConfigs.length}</span>
+                                        Charts: <span>{report.chartConfigs?.length || 0}</span>
                                     </div>
                                     <button
                                         className="btn btn-sm btn-outline flex items-center gap-2"
@@ -330,95 +318,97 @@ const ViewReports = () => {
                                         className="flex flex-col gap-6 mt-4"
                                         aria-live="polite"
                                     >
-                                        {report.chartConfigs.map((chart, index) => {
-                                            const chartKey = chart._id || index;
-                                            return (
-                                                <article key={chartKey} className="bg-white rounded-lg border p-4 shadow-sm">
-                                                    <div className="h-[300px] w-full mb-4">
-                                                        {chart.chartData && chart.chartData.labels && chart.chartData.datasets ? (
-                                                            (() => {
-                                                                switch (chart.chartType) {
-                                                                    case 'bar':
-                                                                        return <Bar data={chart.chartData} options={zoomOptions} />;
-                                                                    case 'line':
-                                                                        return <Line data={chart.chartData} options={zoomOptions} />;
-                                                                    case 'pie':
-                                                                        return <Pie data={chart.chartData} options={{ maintainAspectRatio: false, responsive: true }} />;
-                                                                    default:
-                                                                        return <Bar data={chart.chartData} options={zoomOptions} />;
-                                                                }
-                                                            })()
-                                                        ) : (
-                                                            <p className="text-red-500 text-center py-20">Chart data is missing or invalid.</p>
-                                                        )}
-                                                    </div>
+                                        {report.chartConfigs && report.chartConfigs.length > 0 ? (
+                                            report.chartConfigs.map((chart, index) => {
+                                                const chartKey = chart._id || index;
+                                                return (
+                                                    <article key={chartKey} className="bg-white rounded-lg border p-4 shadow-sm">
+                                                        <div className="h-[300px] w-full mb-4">
+                                                            {chart.chartData && chart.chartData.labels && chart.chartData.datasets ? (
+                                                                (() => {
+                                                                    switch (chart.chartType) {
+                                                                        case 'bar':
+                                                                            return <Bar data={chart.chartData} options={zoomOptions} />;
+                                                                        case 'line':
+                                                                            return <Line data={chart.chartData} options={zoomOptions} />;
+                                                                        case 'pie':
+                                                                            return <Pie data={chart.chartData} options={{ maintainAspectRatio: false, responsive: true }} />;
+                                                                        default:
+                                                                            return <Bar data={chart.chartData} options={zoomOptions} />;
+                                                                    }
+                                                                })()
+                                                            ) : (
+                                                                <p className="text-red-500 text-center py-20">Chart data is missing or invalid.</p>
+                                                            )}
+                                                        </div>
 
-                                                    <div className="flex flex-wrap items-center gap-3">
-                                                        <button
-                                                            onClick={() => setModalChart(chart)}
-                                                            className="btn btn-sm btn-primary"
-                                                            aria-label={`View fullscreen chart for ${chartKey}`}
-                                                        >
-                                                            View Fullscreen
-                                                        </button>
-
-                                                        <button
-                                                            onClick={() => downloadChartAsPNG(chart.chartData, chart.chartType, chartKey)}
-                                                            className="btn btn-sm btn-outline"
-                                                            aria-label={`Download PNG for chart ${chartKey}`}
-                                                        >
-                                                            Download PNG
-                                                        </button>
-
-                                                        <button
-                                                            onClick={() =>
-                                                                downloadChartAsPDF(
-                                                                    chart.chartData,
-                                                                    chart.chartType,
-                                                                    chartKey,
-                                                                    insightsMap[chartKey] || chart.insights || ''
-                                                                )
-                                                            }
-                                                            className="btn btn-sm btn-outline"
-                                                            aria-label={`Download PDF for chart ${chartKey}`}
-                                                        >
-                                                            Download PDF
-                                                        </button>
-
-                                                        {!(insightsMap[chartKey] || chart.insights) && (
+                                                        <div className="flex flex-wrap items-center gap-3">
                                                             <button
-                                                                onClick={() => generateInsight(chartKey, chart.chartData, chart.chartType)}
-                                                                className="btn btn-sm btn-outline flex items-center gap-2"
-                                                                disabled={loadingInsightMap[chartKey]}
-                                                                aria-label={`Generate insight for chart ${chartKey}`}
+                                                                onClick={() => setModalChart(chart)}
+                                                                className="btn btn-sm btn-primary"
+                                                                aria-label={`View fullscreen chart for ${chartKey}`}
                                                             >
-                                                                {loadingInsightMap[chartKey] ? (
-                                                                    <>
-                                                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                                                        Generating...
-                                                                    </>
-                                                                ) : (
-                                                                    'Generate Insight'
-                                                                )}
+                                                                <Eye className="w-4 h-4 mr-1 inline" /> Fullscreen
                                                             </button>
-                                                        )}
-                                                    </div>
 
-                                                    {/* Insight block below buttons */}
-                                                    {
-                                                        (insightsMap[chartKey] || chart.insights) && (
-                                                            <div className="text-sm text-gray-700 bg-gray-100 p-3 rounded-lg whitespace-pre-wrap max-w-full min-w-[200px]">
+                                                            <button
+                                                                onClick={() => downloadChartAsPNG(chart.chartData, chart.chartType, chartKey)}
+                                                                className="btn btn-sm btn-outline"
+                                                                aria-label={`Download PNG for chart ${chartKey}`}
+                                                            >
+                                                                PNG
+                                                            </button>
+
+                                                            <button
+                                                                onClick={() =>
+                                                                    downloadChartAsPDF(
+                                                                        chart.chartData,
+                                                                        chart.chartType,
+                                                                        chartKey,
+                                                                        insightsMap[chartKey] || chart.insights || ''
+                                                                    )
+                                                                }
+                                                                className="btn btn-sm btn-outline"
+                                                                aria-label={`Download PDF for chart ${chartKey}`}
+                                                            >
+                                                                PDF
+                                                            </button>
+
+                                                            {!(insightsMap[chartKey] || chart.insights) && (
+                                                                <button
+                                                                    onClick={() => generateInsight(chartKey, chart.chartData, chart.chartType)}
+                                                                    className="btn btn-sm btn-outline text-primary-600 hover:bg-primary-50"
+                                                                    disabled={loadingInsightMap[chartKey]}
+                                                                    aria-label={`Generate insight for chart ${chartKey}`}
+                                                                >
+                                                                    {loadingInsightMap[chartKey] ? (
+                                                                        <span className="flex items-center gap-1">
+                                                                            <Loader2 className="w-3 h-3 animate-spin" /> Analyzing...
+                                                                        </span>
+                                                                    ) : (
+                                                                        'Generate Insight'
+                                                                    )}
+                                                                </button>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Insight block below buttons */}
+                                                        {(insightsMap[chartKey] || chart.insights) && (
+                                                            <div className="text-sm text-gray-700 bg-gray-100 p-3 rounded-lg whitespace-pre-wrap max-w-full min-w-[200px] mt-4">
                                                                 <strong>📊 Insight:</strong>
-                                                                <ReactMarkdown>{insightsMap[chartKey] || chart.insights}</ReactMarkdown>
+                                                                <div className="mt-1 prose prose-sm max-w-none">
+                                                                    <ReactMarkdown>{insightsMap[chartKey] || chart.insights}</ReactMarkdown>
+                                                                </div>
                                                             </div>
-                                                        )
-                                                    }
-                                                </article>
-                                            );
-                                        })}
+                                                        )}
+                                                    </article>
+                                                );
+                                            })
+                                        ) : (
+                                            <p className="text-gray-500 text-sm">No charts saved for this upload yet.</p>
+                                        )}
                                     </div>
-                                )
-                                }
+                                )}
                             </section>
                         );
                     })
@@ -426,39 +416,39 @@ const ViewReports = () => {
                     <div className="col-span-full text-center py-16">
                         <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                         <p className="text-gray-500 text-lg">No reports found yet.</p>
+                        <Link to="/upload" className="btn btn-primary btn-sm mt-4 inline-flex">
+                            Upload a Spreadsheet
+                        </Link>
                     </div>
                 )}
             </motion.div>
 
-            {
-                modalChart && (
-                    <div className="fixed inset-0 z-50 bg-black bg-opacity-70 flex justify-center items-center">
-                        <div className="bg-white p-6 rounded-xl max-w-5xl w-full h-full max-h-[90vh] overflow-auto shadow-lg relative">
-                            <button
-                                onClick={() => setModalChart(null)}
-                                className="absolute top-3 right-3 text-gray-600 text-lg font-bold"
-                                aria-label="Close fullscreen modal"
-                            >
-                                ✖
-                            </button>
-                            {(modalChart.chartData && modalChart.chartData.labels && modalChart.chartData.datasets) ? (
-                                (() => {
-                                    switch (modalChart.chartType) {
-                                        case 'bar': return <Bar data={modalChart.chartData} options={zoomOptions} />;
-                                        case 'line': return <Line data={modalChart.chartData} options={zoomOptions} />;
-                                        case 'pie': return <Pie data={modalChart.chartData} options={{ maintainAspectRatio: false, responsive: true }} />;
-                                        default: return <Bar data={modalChart.chartData} options={{ maintainAspectRatio: false, responsive: true }} />;
-                                    }
-                                })()
-                            ) : (
-                                <div className="text-red-500">Chart data is missing or invalid.</div>
-                            )}
-                        </div>
+            {modalChart && (
+                <div className="fixed inset-0 z-50 bg-black bg-opacity-70 flex justify-center items-center p-4">
+                    <div className="bg-white p-6 rounded-xl max-w-5xl w-full h-full max-h-[90vh] overflow-auto shadow-lg relative">
+                        <button
+                            onClick={() => setModalChart(null)}
+                            className="absolute top-3 right-3 text-gray-600 text-lg font-bold p-2 hover:bg-gray-100 rounded-lg"
+                            aria-label="Close fullscreen modal"
+                        >
+                            ✕
+                        </button>
+                        {modalChart.chartData && modalChart.chartData.labels && modalChart.chartData.datasets ? (
+                            (() => {
+                                switch (modalChart.chartType) {
+                                    case 'bar': return <Bar data={modalChart.chartData} options={zoomOptions} />;
+                                    case 'line': return <Line data={modalChart.chartData} options={zoomOptions} />;
+                                    case 'pie': return <Pie data={modalChart.chartData} options={{ maintainAspectRatio: false, responsive: true }} />;
+                                    default: return <Bar data={modalChart.chartData} options={{ maintainAspectRatio: false, responsive: true }} />;
+                                }
+                            })()
+                        ) : (
+                            <div className="text-red-500">Chart data is missing or invalid.</div>
+                        )}
                     </div>
-                )
-            }
-
-        </div >
+                </div>
+            )}
+        </div>
     );
 };
 

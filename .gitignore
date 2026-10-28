@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+package-lock.json.backup
+
+# Environment files
+.env
+.env.local
+.env.*.local
+server/.env
+client/.env
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Uploaded user files & logs
+server/uploads/*
+!server/uploads/.gitkeep
+report-log.txt
+*.log
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Editor & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

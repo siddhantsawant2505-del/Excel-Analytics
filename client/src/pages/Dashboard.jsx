@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import clsx from 'clsx';
 import {
   BarChart3,
   Upload,
@@ -9,14 +8,12 @@ import {
   TrendingUp,
   Download,
   Plus,
-  Calendar,
   Activity,
-  PieChart,
-  Eye
+  PieChart
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import api from '../services/api';
 import toast from 'react-hot-toast';
 
 const Dashboard = () => {
@@ -30,10 +27,11 @@ const Dashboard = () => {
 
   const fetchDashboardStats = async () => {
     try {
-      const response = await axios.get('https://excel-analytics-1-4y0b.onrender.com/api/analytics/dashboard/stats');
+      const response = await api.get('/api/analytics/dashboard/stats');
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
+      toast.error('Failed to load dashboard metrics');
     } finally {
       setLoading(false);
     }
@@ -70,7 +68,7 @@ const Dashboard = () => {
       change: '+15%'
     },
     {
-      title: 'This Month',
+      title: 'Active Days',
       value: stats?.activityData?.length || 0,
       icon: Activity,
       color: 'bg-green-500',
@@ -175,6 +173,12 @@ const Dashboard = () => {
                     <span className="text-xs bg-secondary-100 text-secondary-700 px-2 py-1 rounded-full">
                       {upload.chartConfigs?.length || 0} charts
                     </span>
+                    <Link
+                      to={`/analytics/${upload._id}`}
+                      className="btn btn-primary btn-sm ml-2"
+                    >
+                      Analyze
+                    </Link>
                   </div>
                 </div>
               ))
@@ -231,16 +235,16 @@ const Dashboard = () => {
         </motion.div>
       </div>
 
-      {/* Quick Actions - Reduced width but buttons intact */}
+      {/* Quick Actions */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.5 }}
-        className="card p-6 min-h-[180px] "
+        className="card p-6 min-h-[180px]"
       >
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Link
             to="/upload"
             className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg hover:border-primary-300 hover:bg-primary-50 transition-all duration-200 group"

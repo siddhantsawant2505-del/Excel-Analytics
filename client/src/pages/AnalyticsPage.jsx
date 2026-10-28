@@ -5,8 +5,6 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import {
   BarChart3,
-  LineChart,
-  PieChart,
   Download,
   Settings,
   ArrowLeft,
@@ -28,7 +26,7 @@ import { Bar, Line, Pie } from 'react-chartjs-2';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Box, Text } from '@react-three/drei';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import api from '../services/api';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
 
@@ -49,19 +47,6 @@ const AnalyticsPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
 
-  const logAnalytics = async (action, details = {}) => {
-    try {
-      await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/analytics/log', {
-        userId: upload?.user,    // Assuming upload contains `user` field
-        uploadId: id,            // File/report ID
-        action,
-        details
-      });
-    } catch (err) {
-      console.error(`Analytics logging failed for action ${action}`, err);
-    }
-  };
-
   const [upload, setUpload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState(null);
@@ -75,19 +60,30 @@ const AnalyticsPage = () => {
   const [insight, setInsight] = useState('');
   const [loadingInsight, setLoadingInsight] = useState(false);
 
+  const chartRef = useRef(null);
+
+  const logAnalytics = async (action, details = {}) => {
+    try {
+      await api.post('/api/analytics/log', {
+        uploadId: id,
+        action,
+        details
+      });
+    } catch (err) {
+      console.error(`Analytics logging failed for action ${action}`, err);
+    }
+  };
+
   useEffect(() => {
     fetchUploadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const chartRef = useRef(null);
-
   const fetchUploadData = async () => {
     try {
-      const response = await axios.get(`https://excel-analytics-1-4y0b.onrender.com/api/upload/${id}`);
+      const response = await api.get(`/api/upload/${id}`);
       setUpload(response.data);
 
-      // Set default axes if columns are available
       if (response.data.columns && response.data.columns.length >= 2) {
         setChartConfig(prev => ({
           ...prev,
@@ -113,8 +109,7 @@ const AnalyticsPage = () => {
     setGeneratingChart(true);
 
     try {
-      // Fetch chart data for the given upload and selected axes
-      const response = await axios.get(`https://excel-analytics-1-4y0b.onrender.com/api/analytics/chart-data/${id}`, {
+      const response = await api.get(`/api/analytics/chart-data/${id}`, {
         params: {
           xAxis: chartConfig.xAxis,
           yAxis: chartConfig.yAxis,
@@ -124,7 +119,7 @@ const AnalyticsPage = () => {
       setChartData(response.data);
 
       // Save the chart analytics data to the backend
-      await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/chart-analytics', {
+      await api.post('/api/chart-analytics', {
         uploadId: id,
         chartType: chartConfig.type,
         chartData: {
@@ -155,7 +150,7 @@ const AnalyticsPage = () => {
 
     setLoadingInsight(true);
     try {
-      const response = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/insights/generate', {
+      const response = await api.post('/api/insights/generate', {
         config: {
           labels: chartData.labels,
           data: chartData.data,
@@ -166,9 +161,6 @@ const AnalyticsPage = () => {
       });
 
       const rawInsight = response.data?.insight;
-
-      console.log("✅ Raw Insight From Backend:", rawInsight);
-
       if (!rawInsight || typeof rawInsight !== 'string') {
         toast.error('No insights were generated.');
         return;
@@ -230,7 +222,7 @@ const AnalyticsPage = () => {
       },
       title: {
         display: true,
-        text: chartConfig.title || `${chartConfig.type} Chart`,
+        text: chartConfig.title || `${chartConfig.type.toUpperCase()} Chart`,
       },
     },
     scales: chartConfig.type !== 'pie' ? {
@@ -296,13 +288,12 @@ const AnalyticsPage = () => {
     }
   };
 
-  // Improved render3DChart with proportional scaling and centered bars
   const render3DChart = () => {
     if (!chartData || chartConfig.type === 'pie') return null;
 
-    const maxBarHeight = 7; // Maximum height for bars in 3D units
+    const maxBarHeight = 7;
     const maxValue = Math.max(...chartData.data);
-    const spacing = 2; // Distance between bars on x axis
+    const spacing = 2;
 
     return (
       <Canvas camera={{ position: [10, 10, 15], fov: 50 }}>
@@ -317,11 +308,11 @@ const AnalyticsPage = () => {
             <Box
               key={index}
               position={[
-                (index - chartData.data.length / 2) * spacing, // center bars at x=0
-                scaledHeight / 2, // lift box so base sits exactly at y=0
+                (index - chartData.data.length / 2) * spacing,
+                scaledHeight / 2,
                 0
               ]}
-              args={[1, scaledHeight, 1]} // width, height, depth
+              args={[1, scaledHeight, 1]}
             >
               <meshStandardMaterial color={`hsl(${index * 60}, 70%, 50%)`} />
             </Box>
@@ -524,7 +515,6 @@ const AnalyticsPage = () => {
             className="card p-6"
           >
             <h3 className="text-lg font-semibold text-gray-900 mb-4">3D Visualization</h3>
-            {/* Fixed size div for canvas */}
             <div className="three-container" style={{ width: '100%', height: 400 }}>
               {render3DChart()}
             </div>

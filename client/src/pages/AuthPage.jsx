@@ -5,8 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../components/LoadingSpinner';
 import toast from 'react-hot-toast';
-import axios from 'axios';
 import { GoogleLogin } from '@react-oauth/google';
+import api from '../services/api';
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -70,7 +70,7 @@ const AuthPage = () => {
   const handleGoogleLoginSuccess = async (credentialResponse) => {
     setLoading(true);
     try {
-      const backendResult = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/auth/google', {
+      const backendResult = await api.post('/api/auth/google', {
         credential: credentialResponse.credential,
       });
 

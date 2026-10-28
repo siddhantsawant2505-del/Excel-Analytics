@@ -6,17 +6,25 @@ import User from '../models/User.js';
  */
 export const authenticate = async (req, res, next) => {
   try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    const authHeader = req.header('Authorization');
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : null;
     
     if (!token) {
-      return res.status(401).json({ message: 'No token provided' });
+      return res.status(401).json({ message: 'No authorization token provided' });
+    }
+
+    if (!process.env.JWT_SECRET) {
+      console.error('CRITICAL: JWT_SECRET environment variable is missing.');
+      return res.status(500).json({ message: 'Authentication configuration error' });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id).select('-password');
     
     if (!user) {
-      return res.status(401).json({ message: 'Invalid token' });
+      return res.status(401).json({ message: 'Invalid token: user not found' });
     }
 
     if (user.isBlocked) {
@@ -26,8 +34,10 @@ export const authenticate = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
-    console.error('Authentication error:', error);
-    res.status(401).json({ message: 'Token verification failed' });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Token has expired' });
+    }
+    return res.status(401).json({ message: 'Token verification failed' });
   }
 };
 
@@ -45,13 +55,14 @@ export const authorize = (...roles) => {
 };
 
 /**
- * Helper function: Generate JWT token for a given user
- * @param {Object} user User document/model instance
+ * Helper function: Generate JWT token for a given user or user ID
+ * @param {Object|string} user User document or user id
  * @returns {string} JWT token
  */
 export const generateTokenForUser = (user) => {
-  const payload = {
-    id: user._id.toString(),
-  };
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1d' });
+  const userId = typeof user === 'object' && user !== null ? user._id?.toString() || user.id : user;
+  const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn });
 };
+
+export const generateToken = generateTokenForUser;

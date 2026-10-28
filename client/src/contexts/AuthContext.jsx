@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import axios from 'axios';
 import toast from 'react-hot-toast';
+import api from '../services/api';
 
 const AuthContext = createContext();
 
@@ -16,40 +16,17 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Configure axios defaults
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    }
-    
-    // Set base URL
-    axios.defaults.baseURL = 'https://excel-analytics-1-4y0b.onrender.com';
-    
-    // Add response interceptor for token expiration
-    axios.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          logout();
-          toast.error('Session expired. Please login again.');
-        }
-        return Promise.reject(error);
-      }
-    );
-  }, []);
-
   // Check for existing token on mount
   useEffect(() => {
     const checkAuth = async () => {
       const token = localStorage.getItem('token');
       if (token) {
         try {
-          const response = await axios.get('https://excel-analytics-1-4y0b.onrender.com/api/auth/me');
+          const response = await api.get('/api/auth/me');
           setUser(response.data.user);
-        } catch (error) {
+        } catch {
           localStorage.removeItem('token');
-          delete axios.defaults.headers.common['Authorization'];
+          setUser(null);
         }
       }
       setLoading(false);
@@ -60,12 +37,11 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const response = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/auth/login', { email, password });
-      const { token, user } = response.data;
+      const response = await api.post('/api/auth/login', { email, password });
+      const { token, user: userData } = response.data;
       
       localStorage.setItem('token', token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      setUser(user);
+      setUser(userData);
       
       toast.success('Login successful!');
       return { success: true };
@@ -76,16 +52,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Separate function for Google login to avoid confusion
-  const loginWithGoogle = async (token, user) => {
+  const loginWithGoogle = async (token, userData) => {
     try {
       localStorage.setItem('token', token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      setUser(user);
-      
+      setUser(userData);
       return { success: true };
-    } catch (error) {
-      const message = error.response?.data?.message || 'Login failed';
+    } catch {
+      const message = 'Google login failed';
       toast.error(message);
       return { success: false, message };
     }
@@ -93,12 +66,11 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (name, email, password) => {
     try {
-      const response = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/auth/register', { name, email, password });
-      const { token, user } = response.data;
+      const response = await api.post('/api/auth/register', { name, email, password });
+      const { token, user: userData } = response.data;
       
       localStorage.setItem('token', token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      setUser(user);
+      setUser(userData);
       
       toast.success('Registration successful!');
       return { success: true };
@@ -109,24 +81,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = (showToast = true) => {
     localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
     setUser(null);
-    toast.success('Logged out successfully');
+    if (showToast) {
+      toast.success('Logged out successfully');
+    }
   };
 
   const refreshToken = async () => {
     try {
-      const response = await axios.post('https://excel-analytics-1-4y0b.onrender.com/api/auth/refresh');
+      const response = await api.post('/api/auth/refresh');
       const { token } = response.data;
-      
       localStorage.setItem('token', token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
       return { success: true };
-    } catch (error) {
-      logout();
+    } catch {
+      logout(false);
       return { success: false };
     }
   };

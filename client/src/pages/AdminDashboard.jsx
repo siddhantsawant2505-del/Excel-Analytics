@@ -4,15 +4,14 @@ import {
   Users, 
   FileSpreadsheet, 
   BarChart3, 
-  Activity,
-  Shield,
-  Ban,
-  Trash2,
-  MoreVertical
-} from 'lucide-react';  // Add MoreVertical icon for menu toggle
+  Shield, 
+  Ban, 
+  Trash2, 
+  MoreVertical 
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingSpinner from '../components/LoadingSpinner';
-import axios from 'axios';
+import api from '../services/api';
 import toast from 'react-hot-toast';
 
 const AdminDashboard = () => {
@@ -32,7 +31,7 @@ const AdminDashboard = () => {
 
   const fetchAdminStats = async () => {
     try {
-      const response = await axios.get('https://excel-analytics-1-4y0b.onrender.com/api/admin/stats');
+      const response = await api.get('/api/admin/stats');
       setStats(response.data);
     } catch (error) {
       console.error('Error fetching admin stats:', error);
@@ -45,8 +44,8 @@ const AdminDashboard = () => {
   const fetchUsers = async () => {
     setUsersLoading(true);
     try {
-      const response = await axios.get('https://excel-analytics-1-4y0b.onrender.com/api/admin/users');
-      setUsers(response.data.users);
+      const response = await api.get('/api/admin/users');
+      setUsers(response.data.users || []);
     } catch (error) {
       console.error('Error fetching users:', error);
       toast.error('Failed to load users');
@@ -57,10 +56,9 @@ const AdminDashboard = () => {
 
   const handleBlockUser = async (userId, isBlocked) => {
     try {
-      await axios.patch(`https://excel-analytics-1-4y0b.onrender.com/api/admin/users/${userId}/block`, { isBlocked: !isBlocked });
+      await api.patch(`/api/admin/users/${userId}/block`, { isBlocked: !isBlocked });
       toast.success(`User ${!isBlocked ? 'blocked' : 'unblocked'} successfully`);
       fetchUsers();
-      // Close the menu for this user
       toggleActionsMenu(userId);
     } catch (error) {
       console.error('Error updating user status:', error);
@@ -69,15 +67,15 @@ const AdminDashboard = () => {
   };
 
   const handleDeleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+    if (!window.confirm('Are you sure you want to delete this user? All their uploads and analytics will also be permanently deleted.')) {
       return;
     }
 
     try {
-      await axios.delete(`https://excel-analytics-1-4y0b.onrender.com/api/admin/users/${userId}`);
+      await api.delete(`/api/admin/users/${userId}`);
       toast.success('User deleted successfully');
       fetchUsers();
-      fetchAdminStats(); // Refresh stats
+      fetchAdminStats();
       toggleActionsMenu(userId);
     } catch (error) {
       console.error('Error deleting user:', error);
@@ -85,7 +83,6 @@ const AdminDashboard = () => {
     }
   };
 
-  // Toggle showing action menu for a specific user ID
   const toggleActionsMenu = (userId) => {
     setOpenActionUserIds(prev => ({
       ...prev,
@@ -152,7 +149,7 @@ const AdminDashboard = () => {
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
         </div>
         <p className="text-purple-100 text-lg">
-          Monitor platform activity, manage users, and view comprehensive analytics.
+          Monitor platform activity, manage users, and view comprehensive system analytics.
         </p>
       </motion.div>
 
@@ -195,7 +192,7 @@ const AdminDashboard = () => {
         className="card p-6"
       >
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-semibold text-gray-900">Chart Types</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Chart Types Distribution</h3>
           <BarChart3 className="w-5 h-5 text-gray-400" />
         </div>
 
@@ -208,7 +205,7 @@ const AdminDashboard = () => {
               );
 
               return (
-                <div key={type._id} className="flex items-center justify-between">
+                <div key={type._id || index} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`w-3 h-3 rounded-full ${colors[index % colors.length]}`}></div>
                     <span className="text-gray-700 capitalize">{type._id || 'Unknown'}</span>
@@ -306,7 +303,7 @@ const AdminDashboard = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                       {userData.role !== 'admin' ? (
-                        <>
+                        <div className="relative inline-block text-left">
                           <button
                             onClick={() => toggleActionsMenu(userData._id)}
                             className="btn btn-sm btn-outline flex items-center justify-center p-1"
@@ -318,10 +315,9 @@ const AdminDashboard = () => {
 
                           {openActionUserIds[userData._id] && (
                             <div
-                              className="absolute right-0 mt-2 w-28 bg-white border rounded shadow-md z-10 flex flex-col space-y-1 p-2"
+                              className="absolute right-0 mt-2 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-20 flex flex-col space-y-1 p-2"
                               role="menu"
                               aria-orientation="vertical"
-                              aria-label="User actions"
                             >
                               <button
                                 onClick={() => handleBlockUser(userData._id, userData.isBlocked)}
@@ -330,7 +326,6 @@ const AdminDashboard = () => {
                                     ? 'btn-secondary'
                                     : 'btn-outline text-yellow-600 hover:bg-yellow-50'
                                 }`}
-                                title={userData.isBlocked ? 'Unblock user' : 'Block user'}
                                 role="menuitem"
                               >
                                 <Ban className="w-4 h-4 mr-1 inline" />
@@ -340,7 +335,6 @@ const AdminDashboard = () => {
                               <button
                                 onClick={() => handleDeleteUser(userData._id)}
                                 className="btn btn-sm btn-outline text-red-600 hover:bg-red-50 w-full"
-                                title="Delete user"
                                 role="menuitem"
                               >
                                 <Trash2 className="w-4 h-4 mr-1 inline" />
@@ -348,7 +342,7 @@ const AdminDashboard = () => {
                               </button>
                             </div>
                           )}
-                        </>
+                        </div>
                       ) : (
                         <span className="text-gray-400 italic">No actions</span>
                       )}

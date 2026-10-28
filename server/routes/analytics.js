@@ -2,16 +2,19 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import Upload from '../models/Upload.js';
 import Analytics from '../models/Analytics.js';
-import { generateChartInsight } from '../controllers/insight.controller.js';
 import ChartAnalytics from '../models/ChartAnalytics.js';
 
 const router = express.Router();
 
-// Save chart configuration
+// Save chart configuration to upload
 router.post('/chart/:uploadId', authenticate, async (req, res) => {
   try {
     const { chartType, xAxis, yAxis, title } = req.body;
     const { uploadId } = req.params;
+
+    if (!chartType || !xAxis || !yAxis) {
+      return res.status(400).json({ message: 'Missing required chart configuration fields' });
+    }
 
     const upload = await Upload.findOne({
       _id: uploadId,
@@ -19,10 +22,9 @@ router.post('/chart/:uploadId', authenticate, async (req, res) => {
     });
 
     if (!upload) {
-      return res.status(404).json({ message: 'Upload not found' });
+      return res.status(404).json({ message: 'Upload not found or access denied' });
     }
 
-    // Add chart configuration
     upload.chartConfigs.push({
       chartType,
       xAxis,
@@ -34,7 +36,7 @@ router.post('/chart/:uploadId', authenticate, async (req, res) => {
     await upload.save();
 
     // Log analytics
-    const analytics = new Analytics({
+    await Analytics.create({
       user: req.user._id,
       upload: uploadId,
       action: 'chart_create',
@@ -48,9 +50,7 @@ router.post('/chart/:uploadId', authenticate, async (req, res) => {
       userAgent: req.get('User-Agent')
     });
 
-    await analytics.save();
-
-    res.json({ message: 'Chart configuration saved' });
+    res.json({ message: 'Chart configuration saved successfully' });
   } catch (error) {
     console.error('Save chart error:', error);
     res.status(500).json({ message: 'Failed to save chart configuration' });
@@ -63,29 +63,36 @@ router.get('/chart-data/:uploadId', authenticate, async (req, res) => {
     const { xAxis, yAxis } = req.query;
     const { uploadId } = req.params;
 
+    if (!xAxis || !yAxis) {
+      return res.status(400).json({ message: 'Both xAxis and yAxis parameters are required' });
+    }
+
     const upload = await Upload.findOne({
       _id: uploadId,
       user: req.user._id
     });
 
     if (!upload) {
-      return res.status(404).json({ message: 'Upload not found' });
+      return res.status(404).json({ message: 'Upload not found or access denied' });
     }
 
-    const { headers, rows } = upload.sheetData;
+    const { headers, rows } = upload.sheetData || {};
+    if (!headers || !rows) {
+      return res.status(400).json({ message: 'Spreadsheet data is missing or corrupted' });
+    }
 
     const xIndex = headers.indexOf(xAxis);
     const yIndex = headers.indexOf(yAxis);
 
     if (xIndex === -1 || yIndex === -1) {
-      return res.status(400).json({ message: 'Invalid column selection' });
+      return res.status(400).json({ message: 'Selected axis columns do not exist in the spreadsheet' });
     }
 
-    // Extract and process data
+    // Extract and process numeric data points
     const chartData = rows
-      .filter(row => row[xIndex] !== undefined && row[yIndex] !== undefined)
+      .filter(row => row && row[xIndex] !== undefined && row[yIndex] !== undefined)
       .map(row => ({
-        x: row[xIndex],
+        x: String(row[xIndex]),
         y: parseFloat(row[yIndex]) || 0
       }))
       .filter(point => !isNaN(point.y));
@@ -107,34 +114,51 @@ router.get('/dashboard/stats', authenticate, async (req, res) => {
   try {
     const userId = req.user._id;
 
-    // Count total uploads
-    const totalUploads = await Upload.countDocuments({ user: userId });
+    // Run statistical queries in parallel for high performance
+    const [totalUploads, recentUploadsRaw, totalDownloads, activityData] = await Promise.all([
+      Upload.countDocuments({ user: userId }),
+      Upload.find({ user: userId })
+        .select('originalName createdAt')
+        .sort({ createdAt: -1 })
+        .limit(5),
+      Analytics.countDocuments({
+        user: userId,
+        action: { $in: ['download', 'chart_download'] }
+      }),
+      Analytics.aggregate([
+        {
+          $match: {
+            user: userId,
+            createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+          }
+        },
+        {
+          $group: {
+            _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } },
+            count: { $sum: 1 }
+          }
+        },
+        { $sort: { '_id.date': 1 } }
+      ])
+    ]);
 
-    // Fetch recent uploads raw (with minimal fields)
-    const recentUploadsRaw = await Upload.find({ user: userId })
-      .select('originalName createdAt')
-      .sort({ createdAt: -1 })
-      .limit(5);
+    const recentUploadIds = recentUploadsRaw.map(u => u._id);
 
-    // Enrich recent uploads with chart analytics (chartConfigs)
-    const recentUploads = await Promise.all(
-      recentUploadsRaw.map(async (upload) => {
-        try {
+    // Enrich recent uploads with their charts
+    const [recentUploads, chartTypeAggregation] = await Promise.all([
+      Promise.all(
+        recentUploadsRaw.map(async (upload) => {
           const chartAnalytics = await ChartAnalytics.find({ upload: upload._id });
           return {
             ...upload.toObject(),
-            chartConfigs: chartAnalytics,
+            chartConfigs: chartAnalytics
           };
-        } catch {
-          return { ...upload.toObject(), chartConfigs: [] };
-        }
-      })
-    );
-
-    // Aggregate chart types and count total charts from ChartAnalytics
-    const chartTypeAggregation = await ChartAnalytics.aggregate([
-      { $match: { upload: { $in: recentUploadsRaw.map(u => u._id) } } },
-      { $group: { _id: "$chartType", count: { $sum: 1 } } },
+        })
+      ),
+      ChartAnalytics.aggregate([
+        { $match: { upload: { $in: recentUploadIds } } },
+        { $group: { _id: '$chartType', count: { $sum: 1 } } }
+      ])
     ]);
 
     const totalCharts = chartTypeAggregation.reduce((sum, item) => sum + item.count, 0);
@@ -142,29 +166,9 @@ router.get('/dashboard/stats', authenticate, async (req, res) => {
     const chartTypes = chartTypeAggregation.map(({ _id, count }) => ({
       _id,
       count,
-      percentage: totalCharts > 0 ? Math.round((count / totalCharts) * 100) : 0,
+      percentage: totalCharts > 0 ? Math.round((count / totalCharts) * 100) : 0
     }));
 
-    // Count downloads from Analytics
-    const totalDownloads = await Analytics.countDocuments({
-      user: userId,
-      action: { $in: ['download', 'chart_download'] }
-    });
-
-    // Activity over last 30 days
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const activityData = await Analytics.aggregate([
-      { $match: { user: userId, createdAt: { $gte: thirtyDaysAgo } } },
-      {
-        $group: {
-          _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } },
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { '_id.date': 1 } }
-    ]);
-
-    // Respond with dashboard stats
     res.json({
       totalUploads,
       totalCharts,
@@ -179,15 +183,15 @@ router.get('/dashboard/stats', authenticate, async (req, res) => {
   }
 });
 
-// server/routes/analytics.js
+// Get user reports with chart configs
 router.get('/reports', authenticate, async (req, res) => {
   try {
     const uploads = await Upload.find({ user: req.user._id }).sort({ createdAt: -1 });
 
     const enrichedReports = uploads.map((upload) => {
-      const { headers, rows } = upload.sheetData;
+      const { headers = [], rows = [] } = upload.sheetData || {};
 
-      const enrichedChartConfigs = upload.chartConfigs.map((chart) => {
+      const enrichedChartConfigs = (upload.chartConfigs || []).map((chart) => {
         const xIndex = headers.indexOf(chart.xAxis);
         const yIndex = headers.indexOf(chart.yAxis);
 
@@ -202,9 +206,9 @@ router.get('/reports', authenticate, async (req, res) => {
         }
 
         const chartData = rows
-          .filter(row => row[xIndex] !== undefined && row[yIndex] !== undefined)
+          .filter(row => row && row[xIndex] !== undefined && row[yIndex] !== undefined)
           .map(row => ({
-            x: row[xIndex],
+            x: String(row[xIndex]),
             y: parseFloat(row[yIndex]) || 0
           }))
           .filter(point => !isNaN(point.y));
@@ -231,23 +235,26 @@ router.get('/reports', authenticate, async (req, res) => {
   }
 });
 
-router.post('/insights/generate', generateChartInsight);
-
-router.post('/log', async (req, res) => {
+// Securely log user analytics (Requires authentication; never trust client userId)
+router.post('/log', authenticate, async (req, res) => {
   try {
-    const { userId, uploadId, action, details } = req.body;
+    const { uploadId, action, details } = req.body;
+
+    if (!action) {
+      return res.status(400).json({ error: 'Action parameter is required' });
+    }
 
     const analytics = new Analytics({
-      user: userId,
-      upload: uploadId,
+      user: req.user._id, // Enforce authenticated user ID
+      upload: uploadId || null,
       action,
-      details,
+      details: details || {},
       ipAddress: req.ip,
       userAgent: req.get('User-Agent')
     });
 
     await analytics.save();
-    res.status(201).json({ message: 'Analytics logged' });
+    res.status(201).json({ message: 'Analytics logged successfully' });
   } catch (err) {
     console.error('Error logging analytics:', err);
     res.status(500).json({ error: 'Failed to log analytics' });
